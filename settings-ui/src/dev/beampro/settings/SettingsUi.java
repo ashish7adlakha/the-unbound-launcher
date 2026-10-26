@@ -192,6 +192,10 @@ public final class SettingsUi {
             if (!permissions && (originalRows == null || originalLaunch == null)) {
                 throw new IllegalStateException("No settings bindings");
             }
+            int glassesType = preferences.getInt("last_glasses_type", 0);
+            boolean isXbx = glassesType == 10 || glassesType == 11;
+            setColorPref("setSrgbClamp", preferences.getBoolean("pref_color_srgb_clamp", isXbx));
+            setColorPref("setLimitedRange", preferences.getBoolean("pref_color_limited_range", false));
             page = new Page(this);
         }
 
@@ -292,9 +296,11 @@ public final class SettingsUi {
             } else {
                 connectionCard();
                 Section experience = section("Experience");
+                Section display = section("Display & Colors");
                 Section app = section("App");
                 Section advanced = section("Advanced");
                 Section support = section("Support");
+                displaySettings(display);
                 appMenu(app);
                 appPermissions(app);
                 // The original permission screen belongs beside the new permission review.
@@ -420,6 +426,59 @@ public final class SettingsUi {
             row.setFocusable(true);
             row.setContentDescription("Appearance, OLED black");
             section.card.addView(row);
+        }
+
+        void displaySettings(Section section) {
+            int glassesType = preferences.getInt("last_glasses_type", 0);
+            boolean isXbx = glassesType == 10 || glassesType == 11;
+            boolean srgbActive = preferences.getBoolean("pref_color_srgb_clamp", isXbx);
+            boolean rangeActive = preferences.getBoolean("pref_color_limited_range", false);
+
+            setColorPref("setSrgbClamp", srgbActive);
+            setColorPref("setLimitedRange", rangeActive);
+
+            Row srgbRow = new Row(activity, "color", "Clamp colors to sRGB",
+                    "Fix oversaturated SDR colors on wide-gamut glasses");
+            SignatureSwitch srgbToggle = new SignatureSwitch(activity);
+            LinearLayout.LayoutParams srgbParams = new LinearLayout.LayoutParams(dp(52), dp(48));
+            srgbParams.setMarginStart(dp(12));
+            srgbRow.addView(srgbToggle, srgbParams);
+            srgbToggle.setContentDescription("Clamp colors to sRGB");
+            srgbToggle.setChecked(srgbActive);
+            srgbToggle.setOnCheckedChangeListener((button, value) -> {
+                preferences.edit().putBoolean("pref_color_srgb_clamp", value).apply();
+                setColorPref("setSrgbClamp", value);
+            });
+            srgbRow.onClick(v -> srgbToggle.performClick());
+            srgbRow.title.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            srgbRow.subtitle.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            srgbRow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            section.card.addView(srgbRow);
+
+            Row rangeRow = new Row(activity, "color", "Fix Black Crush (16-235)",
+                    "Remap full range to limited for HDR video and S25 Ultra");
+            SignatureSwitch rangeToggle = new SignatureSwitch(activity);
+            LinearLayout.LayoutParams rangeParams = new LinearLayout.LayoutParams(dp(52), dp(48));
+            rangeParams.setMarginStart(dp(12));
+            rangeRow.addView(rangeToggle, rangeParams);
+            rangeToggle.setContentDescription("Fix Black Crush (16-235)");
+            rangeToggle.setChecked(rangeActive);
+            rangeToggle.setOnCheckedChangeListener((button, value) -> {
+                preferences.edit().putBoolean("pref_color_limited_range", value).apply();
+                setColorPref("setLimitedRange", value);
+            });
+            rangeRow.onClick(v -> rangeToggle.performClick());
+            rangeRow.title.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            rangeRow.subtitle.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            rangeRow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            section.card.addView(rangeRow);
+        }
+
+        static void setColorPref(String methodName, boolean value) {
+            try {
+                Class<?> cls = Class.forName("dev.beampro.port.AppColorCompat");
+                cls.getMethod(methodName, boolean.class).invoke(null, value);
+            } catch (Throwable ignored) {}
         }
 
         void link(Section section, String glyph, String title, String subtitle, View.OnClickListener action) {

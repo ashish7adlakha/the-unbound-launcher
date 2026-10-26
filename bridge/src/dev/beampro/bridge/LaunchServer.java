@@ -218,8 +218,7 @@ public final class LaunchServer {
                 ProviderCallCompat.shellAttribution(android.os.Process.myUid()), "dev.beampro.portprobe.bridge", payload);
         if (result == null || !result.getBoolean("published")) throw new IllegalStateException("Binder publication failed");
         System.out.println("BEAM_LAUNCH_SERVER_READY pid=" + android.os.Process.myPid() + " uid=" + android.os.Process.myUid());
-        System.out.flush();
-        if (ENABLE_DISPLAY_MANAGEMENT) ManagedDisplay.start(shell);
+        if (ENABLE_DISPLAY_MANAGEMENT && !"samsung".equalsIgnoreCase(android.os.Build.MANUFACTURER)) ManagedDisplay.start(shell);
         Looper.loop();
     }
 

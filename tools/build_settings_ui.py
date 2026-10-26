@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import zipfile
 from permission_manifest import patch_manifest as patch_permission_manifest
 from adaptive_manifest import patch_adaptive_manifest
@@ -26,9 +27,57 @@ from app_version import load_version, manifest_version, patch_manifest_version, 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "artifacts/port-default-m/myglasses-startup-candidate.apk"
 BASELINE_SHA = "79aaf7a133931b7b886cb334d94d4b4e5a643ac272da4470ca22eceea7e5912e"
-SDK = Path.home() / "Library/Android/sdk"
-TOOLS = SDK / "build-tools/36.0.0"
-PLATFORM = SDK / "platforms/android-34/android.jar"
+
+
+def find_sdk():
+    if "ANDROID_HOME" in os.environ and Path(os.environ["ANDROID_HOME"]).exists():
+        return Path(os.environ["ANDROID_HOME"])
+    if "ANDROID_SDK_ROOT" in os.environ and Path(os.environ["ANDROID_SDK_ROOT"]).exists():
+        return Path(os.environ["ANDROID_SDK_ROOT"])
+    if os.name == "nt":
+        local_app = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "Android/Sdk"
+        if local_app.exists():
+            return local_app
+    return Path.home() / "Library/Android/sdk"
+
+
+def find_tools(sdk):
+    build_tools = sdk / "build-tools"
+    if build_tools.exists():
+        versions = sorted([v for v in build_tools.iterdir() if v.is_dir()], reverse=True)
+        if versions:
+            return versions[0]
+    return sdk / "build-tools/36.0.0"
+
+
+def find_platform(sdk):
+    platforms = sdk / "platforms"
+    if platforms.exists():
+        versions = sorted(platforms.glob("android-*"), reverse=True)
+        for p in versions:
+            jar = p / "android.jar"
+            if jar.exists():
+                return jar
+    return sdk / "platforms/android-34/android.jar"
+
+
+def find_java():
+    if "JAVA_HOME" in os.environ and Path(os.environ["JAVA_HOME"]).exists():
+        return Path(os.environ["JAVA_HOME"])
+    if sys.platform == "darwin":
+        try:
+            return Path(subprocess.check_output(["/usr/libexec/java_home", "-v", "17"], text=True).strip())
+        except Exception:
+            pass
+    which_java = shutil.which("java")
+    if which_java:
+        return Path(which_java).resolve().parents[1]
+    return Path("C:/Program Files/Eclipse Adoptium/jdk-17")
+
+
+SDK = find_sdk()
+TOOLS = find_tools(SDK)
+PLATFORM = find_platform(SDK)
 
 
 def sha256(path):
@@ -45,7 +94,7 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "artifacts/unbound-launcher-help")
     parser.add_argument("--preview-only", action="store_true")
     args = parser.parse_args()
-    java = Path(subprocess.check_output(["/usr/libexec/java_home", "-v", "17"], text=True).strip())
+    java = find_java()
     env = dict(os.environ, JAVA_HOME=str(java))
     output = args.output.resolve()
     build = output / "build"
@@ -64,8 +113,19 @@ def main():
                    for name in launcher_icons}
     icon_assets.update(settings_assets)
 
+    def exe(path):
+        p = Path(path)
+        if os.name == "nt":
+            for ext in (".bat", ".exe", ".cmd", ""):
+                cand = p.with_name(p.name + ext)
+                if cand.exists():
+                    return cand
+        return p
+
     def run(*command):
-        subprocess.run([str(arg) for arg in command], check=True, env=env)
+        cmd = list(command)
+        cmd[0] = exe(cmd[0])
+        subprocess.run([str(arg) for arg in cmd], check=True, env=env)
 
     def compile_sources(sources, dest):
         # A reused output must not package classes removed from the source tree.

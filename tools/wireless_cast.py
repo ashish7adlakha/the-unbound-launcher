@@ -30,15 +30,25 @@ def compile_port_client(build, java, env, platform, tools):
     classes.mkdir(parents=True, exist_ok=True)
     dex.mkdir(parents=True, exist_ok=True)
     jar = build / "client.jar"
+    def exe(path):
+        p = Path(path)
+        import os
+        if os.name == "nt":
+            for ext in (".bat", ".exe", ".cmd", ""):
+                cand = p.with_name(p.name + ext)
+                if cand.exists():
+                    return cand
+        return p
+
     commands = [
-        [Path(java) / "bin/javac", "--release", "8", "-classpath", platform, "-d", classes,
+        [exe(Path(java) / "bin/javac"), "--release", "8", "-classpath", platform, "-d", classes,
          *sorted((ROOT / "port-client/src").rglob("*.java"))],
-        [Path(java) / "bin/jar", "cf", jar, "-C", classes, "."],
-        [Path(tools) / "d8", "--min-api", "29", "--lib", platform, "--output", dex, jar],
+        [exe(Path(java) / "bin/jar"), "cf", jar, "-C", classes, "."],
+        [exe(Path(tools) / "d8"), "--min-api", "29", "--lib", platform, "--output", dex, jar],
     ]
     for command in commands:
         subprocess.run([str(arg) for arg in command], check=True, env=env)
-    subprocess.run([str(Path(java) / "bin/java"), "--class-path",
+    subprocess.run([str(exe(Path(java) / "bin/java")), "--class-path",
                     str(ROOT / "artifacts/tools/jadx-1.5.6/lib/jadx-1.5.6-all.jar"),
                     str(ROOT / "tools/PatchWirelessCastDex.java"), "verify-client",
                     str(dex / "classes.dex"), str(dex / "classes.dex")], check=True, env=env)

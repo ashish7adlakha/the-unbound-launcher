@@ -9,7 +9,8 @@ import tempfile
 import unittest
 import zipfile
 
-from app_color import APP_SHADER, SOFTWARE_SHADER, software_app_shader, verify_app_shader
+from app_color import (APP_SHADER, SOFTWARE_SHADER, software_app_shader, verify_app_shader,
+                        srgb_to_p3_transform, full_to_limited_remap, color_transform_glsl)
 from build_embedded_adb import BASE, ROOT
 
 sys.path.insert(0,str(ROOT/'artifacts/tools/python'))
@@ -89,6 +90,35 @@ class AppColorTests(unittest.TestCase):
                     file.write_text(version+'\n#define '+macro+' 1\n'+rest)
                     result=subprocess.run([str(compiler),'-S',stage,str(file)],text=True,capture_output=True)
                     self.assertEqual(result.returncode,0,f'variant {index} {stage}: '+result.stdout+result.stderr)
+
+
+    def test_gamut_clamp_and_limited_range_transform(self):
+        # White point preservation (1, 1, 1 -> 1, 1, 1)
+        wr, wg, wb = srgb_to_p3_transform(1.0, 1.0, 1.0)
+        self.assertAlmostEqual(wr, 1.0, places=4)
+        self.assertAlmostEqual(wg, 1.0, places=4)
+        self.assertAlmostEqual(wb, 1.0, places=4)
+
+        # Black point preservation (0, 0, 0 -> 0, 0, 0)
+        br, bg, bb = srgb_to_p3_transform(0.0, 0.0, 0.0)
+        self.assertEqual((br, bg, bb), (0.0, 0.0, 0.0))
+
+        # Pure green clamp (0, 1, 0 -> 0.177538, 0.966806, 0.072397)
+        gr, gg, gb = srgb_to_p3_transform(0.0, 1.0, 0.0)
+        self.assertAlmostEqual(gr, 0.177538, places=4)
+        self.assertAlmostEqual(gg, 0.966806, places=4)
+        self.assertAlmostEqual(gb, 0.072397, places=4)
+
+        # Limited range remap (0 -> 16/255, 1 -> 235/255)
+        lr0, lg0, lb0 = full_to_limited_remap(0.0, 0.0, 0.0)
+        self.assertAlmostEqual(lr0, 16.0 / 255.0, places=4)
+        lr1, lg1, lb1 = full_to_limited_remap(1.0, 1.0, 1.0)
+        self.assertAlmostEqual(lr1, 235.0 / 255.0, places=4)
+
+        # GLSL code structure check
+        glsl = color_transform_glsl()
+        self.assertIn("clampSrgbToP3", glsl)
+        self.assertIn("remapToLimitedRange", glsl)
 
 
 if __name__=='__main__':unittest.main()

@@ -20,6 +20,53 @@ SOFTWARE_SHADER = 'assets/bin/Data/1296c2c63c9cea8469aa31beb05d3a93'
 APP_SHA256 = '753801c2eced5d1cf391937f0c94e8371038bcebe934bace68089924e3ebfbd7'
 SOFTWARE_SHA256 = 'fe9da9474cd6881db846df540f959184d618219b6df543cf8e99c7b76f58f851'
 
+# Color matrix for sRGB (Rec.709) to DCI-P3 (D65 white point) in linear space
+SRGB_TO_DCIP3_MATRIX = [
+    [0.822462, 0.177538, 0.000000],
+    [0.033194, 0.966806, 0.000000],
+    [0.017083, 0.072397, 0.910520]
+]
+
+# Limited range remap parameters: Full (0..255) -> Limited (16..235)
+LIMITED_RANGE_SCALE = 219.0 / 255.0  # ~0.85882355
+LIMITED_RANGE_OFFSET = 16.0 / 255.0  # ~0.0627451
+
+
+def srgb_to_p3_transform(r, g, b):
+    """Linear space sRGB to DCI-P3 gamut clamp."""
+    cr = SRGB_TO_DCIP3_MATRIX[0][0]*r + SRGB_TO_DCIP3_MATRIX[0][1]*g + SRGB_TO_DCIP3_MATRIX[0][2]*b
+    cg = SRGB_TO_DCIP3_MATRIX[1][0]*r + SRGB_TO_DCIP3_MATRIX[1][1]*g + SRGB_TO_DCIP3_MATRIX[1][2]*b
+    cb = SRGB_TO_DCIP3_MATRIX[2][0]*r + SRGB_TO_DCIP3_MATRIX[2][1]*g + SRGB_TO_DCIP3_MATRIX[2][2]*b
+    return max(0.0, min(1.0, cr)), max(0.0, min(1.0, cg)), max(0.0, min(1.0, cb))
+
+
+def full_to_limited_remap(r, g, b):
+    """Full [0,1] range to Limited [16/255, 235/255] range compression."""
+    return (
+        LIMITED_RANGE_OFFSET + r * LIMITED_RANGE_SCALE,
+        LIMITED_RANGE_OFFSET + g * LIMITED_RANGE_SCALE,
+        LIMITED_RANGE_OFFSET + b * LIMITED_RANGE_SCALE,
+    )
+
+
+def color_transform_glsl():
+    """GLSL helper functions for sRGB gamut clamp and limited range compression."""
+    return (
+        "// sRGB -> DCI-P3 D65 gamut clamp in linear space\n"
+        "vec3 clampSrgbToP3(vec3 c) {\n"
+        "    mat3 m = mat3(\n"
+        "        0.822462, 0.033194, 0.017083,\n"
+        "        0.177538, 0.966806, 0.072397,\n"
+        "        0.000000, 0.000000, 0.910520\n"
+        "    );\n"
+        "    return clamp(m * c, 0.0, 1.0);\n"
+        "}\n\n"
+        "// Full 0..255 -> Limited 16..235 range compression\n"
+        "vec3 remapToLimitedRange(vec3 c) {\n"
+        "    return vec3(0.0627451) + c * vec3(0.85882355);\n"
+        "}\n"
+    )
+
 
 def software_app_shader(base):
     original=base.read(APP_SHADER);software=base.read(SOFTWARE_SHADER)
