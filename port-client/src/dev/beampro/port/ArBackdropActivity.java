@@ -39,7 +39,6 @@ public final class ArBackdropActivity extends Activity {
     static void ensure(Activity owner,View root) {
         if(owner==null||owner.isFinishing()||owner.isDestroyed()||root==null||!root.isAttachedToWindow()
                 ||!DisplayStartupCompat.xreal(root.getDisplay())||!DisplayStartupCompat.stereoEdid(root.getDisplay()))return;
-        if ("samsung".equalsIgnoreCase(Build.MANUFACTURER)) return;
         int display=root.getDisplay().getDisplayId();
         Lease current=leases.get(display);
         if(current!=null&&current.owner.get()==owner){current.root=new WeakReference<>(root);return;}

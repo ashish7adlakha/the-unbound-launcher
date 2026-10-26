@@ -167,10 +167,7 @@ public final class DisplayStartupCompat implements Application.ActivityLifecycle
             if (xreal(display)) {
                 actual = new Bundle(options);
                 // ActivityOptions' framework key: a fullscreen request for this task only.
-                // Do not force AOSP windowingMode 1 on Samsung as it triggers Samsung DeX.
-                if (!"samsung".equalsIgnoreCase(Build.MANUFACTURER)) {
-                    actual.putInt("android.activity.windowingMode", 1);
-                }
+                actual.putInt("android.activity.windowingMode", 1);
             }
         }
         activity.startActivity(intent, actual);

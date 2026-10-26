@@ -213,7 +213,6 @@ final class ManagedDisplay {
                     <PowerManager.THERMAL_STATUS_SEVERE;
         }
         public boolean desktop(ManagedDisplayPolicy.Screen screen) throws Exception {
-            if ("samsung".equalsIgnoreCase(android.os.Build.MANUFACTURER)) return false;
             if(!desktopPreference)return false;
             try {
                 int preference=(Integer)call("getConnectionPreference",new Class<?>[]{String.class},screen.uniqueId);
@@ -230,7 +229,6 @@ final class ManagedDisplay {
         }
         public boolean enableWithoutDesktopPreference() { return legacyEnable; }
         public String mirror() throws Exception {
-            if ("samsung".equalsIgnoreCase(android.os.Build.MANUFACTURER)) return "0";
             // Use Android's shell settings client, which acquires its provider as
             // an external shell caller instead of requiring an app-bound resolver.
             ShellCommand.Result result=ShellCommand.run(3000,"settings","get","secure","mirror_built_in_display");
@@ -241,7 +239,6 @@ final class ManagedDisplay {
             return value;
         }
         public void mirror(String value) throws Exception {
-            if ("samsung".equalsIgnoreCase(android.os.Build.MANUFACTURER)) return;
             if(value!=null&&!value.equals("0")&&!value.equals("1"))throw new IllegalArgumentException("Invalid mirror setting");
             ShellCommand.Result result=value==null
                     ?ShellCommand.run(3000,"settings","delete","secure","mirror_built_in_display")
