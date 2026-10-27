@@ -116,9 +116,6 @@ public final class AppColorCompat {
     // Called through the original AndroidSurfaceTexture wrapper on Unity's thread.
     // No GL calls here: capability negotiation happened on the render thread.
     public static boolean needsSoftwareDecode(Object owner) {
-        if (srgbClamp || limitedRange) {
-            return true;
-        }
         Boolean value=software.get(owner);
         return value!=null&&value;
     }
