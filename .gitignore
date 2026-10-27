@@ -64,3 +64,16 @@ venv/
 .DS_Store
 ._*
 __MACOSX/
+
+# Local rebuild toolchains and scratch output (tools/rebuild_from_extracted_apk.py).
+/build_temp/
+/build_dl/
+/tools/android-sdk/
+/tools/jdk-17/
+/tools/python/
+/*.apk.sha256
+
+# Superseded Gemini planning notes for the old extracted-folder workflow.
+/implementation_plan_color_and_range.md
+/recompile_and_asset_guide.md
+/recompile_and_asset_guide2.md
