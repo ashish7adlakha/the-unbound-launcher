@@ -63,17 +63,19 @@ python3 tools/verify_embedded_adb.py artifacts/unbound-launcher-adb-recovery/the
    as soon as Android confirms pairing, while the helper starts. Its result replaces
    the code-entry notification, clears on tap, and expires after 30 seconds.
    Invalid or rejected codes retain code entry for another attempt.
-7. Wait for **Ready**, then tap **Finish setup** to enter the launcher. Optional
+7. Wait for **Ready**, then tap **Continue**. Review the inline **Terms of service**
+   and **Privacy policy**, then tap **Agree and finish** to enter the launcher. Optional
    permissions skipped earlier do not appear again at this transition. After a reboot,
    enable Wireless debugging and use **Connect and start**. Android may require
    pairing again after the identity is revoked, expires, or the app is uninstalled.
 
-With the **0.1.7** helper Ready, identified XREAL glasses get a saved **Desktop**
-connection preference. The helper selects that mode automatically, including
-the SBS reconnect, instead of requiring the repeated Android chooser. Android
-may show the initial chooser before the helper has first configured the glasses.
-Pairing consent remains part of Android's initial ADB setup. In older builds,
-choose Desktop in both prompts: Android Mirror prevents renderer activity launch.
+With the helper Ready, identified XREAL glasses are routed to **Mirror** and
+enabled automatically, including the SBS reconnect, so the SDK's native
+Presentation can draw AR on the glasses without a Desktop task. The helper
+journals the previous connection choice and restores it when the glasses leave
+or the session ends. Android may show the initial chooser before the helper has
+first configured the glasses; choose Mirror if it does. Pairing consent remains
+part of Android's initial ADB setup.
 
 The fixed footer only allows continuation when the real launch-helper Binder is
 alive. Completion is saved so subsequent permission reviews and ADB recovery do
@@ -135,9 +137,10 @@ activity. The new setup activity and service are not exported.
 
 The production embedded helper also starts an independent display watchdog;
 the companion/development helper and isolated test helper leave this feature off.
-On Android builds with the inspected display APIs, it records Desktop only for
-physical XREAL displays identified by MRG product data. The Desktop preference
-is kept so Android can avoid the chooser on later connections. The helper's
+On Android builds with the inspected display APIs, it routes physical XREAL
+displays identified by MRG product data to Mirror and journals the previous
+connection choice. Mirror keeps the glasses display available for the SDK's
+Presentation without creating a Desktop task. The helper's
 discovery polls `IDisplayManager.getDisplayIds(true)` and `getDisplayInfo(id)`
 directly. The 0.1.5 Pixel test showed Android deferring both shell processes'
 display callbacks (`cached=true`, with pending events), leaving the framework's
@@ -169,7 +172,11 @@ the current GL extension and texture-parameter readback, then enables the
 existing GAMMA_TO_LINEAR keyword only for textures requiring software decode.
 The selected 24 shader variants use the exact stock software programs; the
 remaining 24 preserve the original hardware-path programs. No device-brand
-allowlist is involved. See [color selection](../reports/universal-app-colors.md).
+allowlist is involved. Protected overlay windows such as YouTube never enter
+that Unity copy. The compositor decodes external layers and sampler2D window
+layers with the IEC sRGB curve, the static blit sampler does too, and the
+compositor no longer calls the override Mali rejects. See
+[color selection](../reports/universal-app-colors.md).
 
 The native SDK creates an independent Presentation whose views bypass the old
 Java-view constructor hook. During the AR owner's lifetime, 0.1.8 discovers
@@ -260,7 +267,13 @@ test APK with the same implementation and different package/provider constants.
 Notification UI validation and final artifact results are recorded in the
 candidate's verification files.
 
-The revised setup has 43 isolated Android 13 emulator assertions covering
+Build 2902 adds the inline terms step with 157 emulator assertions covering
+setup ordering, the live-helper handoff, document routing, saved acceptance,
+interruption/recreation, and portrait/landscape layouts up to 200% text. The full
+launcher also passes fresh setup using its real agreement callbacks. See the
+[inline terms report](../reports/inline-terms-setup.md).
+
+The earlier two-step setup has 43 isolated Android 13 emulator assertions covering
 disclaimer → permissions → ADB ordering, the required overlay grant, a disabled
 Finish setup without the helper, Ready and continuation with the actual shell helper, notification entry without
 an onboarding extra, incoming connection intent preservation, recreation, manual

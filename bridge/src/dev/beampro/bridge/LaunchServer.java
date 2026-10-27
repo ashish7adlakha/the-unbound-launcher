@@ -12,11 +12,14 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
+import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import dev.beampro.settings.NetworkDiagnostics;
+import dev.beampro.settings.DisplayDiagnostics;
 
 /** Hosts the original launch Binder under shell UID with signature-checked access. */
 public final class LaunchServer {
@@ -52,7 +55,12 @@ public final class LaunchServer {
         PackageManager packages = shell.getPackageManager();
         int probeUid = packages.getApplicationInfo("dev.beampro.portprobe", 0).uid;
         XrealUsbPermissions usb = ENABLE_DISPLAY_MANAGEMENT ? new XrealUsbPermissions(packages, probeUid) : null;
+        AutoArEntry autoEntry = ENABLE_DISPLAY_MANAGEMENT ? new AutoArEntry(packages, probeUid, usb) : null;
         PhoneScreenPower phoneScreen = new PhoneScreenPower(shell);
+        GlassesNetworkProbe glassesNetwork = new GlassesNetworkProbe(probeUid);
+        DisplayDumpPipe displayDumps = new DisplayDumpPipe(probeUid);
+        AppClassification classification = new AppClassification(packages, probeUid,
+                new java.io.File("/data/local/tmp/unbound-category-" + probeUid + ".bin"));
         IBinder guarded = new Binder() {
             @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
                 int caller = Binder.getCallingUid();
@@ -61,6 +69,50 @@ public final class LaunchServer {
                 }
                 long identity = Binder.clearCallingIdentity();
                 try {
+                    if (code == DisplayDiagnostics.TRANSACTION) {
+                        data.enforceInterface(DisplayDiagnostics.TOKEN);
+                        try (ParcelFileDescriptor pipe = displayDumps.open(caller, data.readInt())) {
+                            reply.writeNoException(); pipe.writeToParcel(reply, 0);
+                        } catch (SecurityException denied) { throw denied; }
+                        catch (java.io.IOException failure) { throw new IllegalStateException(failure.getMessage(), failure); }
+                        return true;
+                    }
+                    if (code == GlassesNetworkProbe.TRANSACTION) {
+                        data.enforceInterface(GlassesNetworkProbe.TOKEN);
+                        ShellCommand.Result result;
+                        try { result=glassesNetwork.ping(caller); }
+                        catch (SecurityException denied) { throw denied; }
+                        catch (Exception error) { result=new ShellCommand.Result(-1,false,error.toString()); }
+                        reply.writeNoException();reply.writeInt(result.exitCode);reply.writeInt(result.timedOut?1:0);
+                        reply.writeString(result.output.substring(0,Math.min(2048,result.output.length())));
+                        return true;
+                    }
+                    if (code == NetworkDiagnostics.TRANSACTION) {
+                        data.enforceInterface(NetworkDiagnostics.TOKEN);
+                        if (caller != probeUid) throw new SecurityException("Network diagnostics are restricted to the installed launcher");
+                        String report = NetworkDiagnostics.capture(true);
+                        reply.writeNoException(); reply.writeString(report);
+                        return true;
+                    }
+                    if (code == AppClassification.TRANSACTION) {
+                        data.enforceInterface(AppClassification.TOKEN);
+                        int category = -1;
+                        String error = null;
+                        try { category = classification.request(caller, data.readInt()); }
+                        catch (Exception failure) { error = failure.getMessage() == null ? failure.toString() : failure.getMessage(); }
+                        reply.writeNoException(); reply.writeString(error); reply.writeInt(category);
+                        return true;
+                    }
+                    if (code == AutoArEntry.TRANSACTION && autoEntry != null) {
+                        data.enforceInterface(AutoArEntry.TOKEN);
+                        boolean attached=data.readInt()!=0;
+                        AutoArEntry.Key key=new AutoArEntry.Key(data.readString(),data.readInt(),data.readInt(),data.readInt());
+                        String error=null;
+                        try { autoEntry.request(caller,key,attached); }
+                        catch(Exception failure) { error=failure.toString(); }
+                        reply.writeNoException();reply.writeString(error);
+                        return true;
+                    }
                     if (code == XrealUsbPermissions.TRANSACTION && usb != null) {
                         data.enforceInterface(XrealUsbPermissions.TOKEN);
                         String name=data.readString();
@@ -254,7 +306,7 @@ public final class LaunchServer {
 
     private static final class WindowContext extends ContextWrapper {
         WindowContext(Context shell) { super(shell); }
-        @Override public String getPackageName() { return "com.xreal.evapro.nebula"; }
+        @Override public String getPackageName() { return "dev.markpronkin.unbound"; }
         @Override public String getOpPackageName() { return "com.android.shell"; }
         @Override public Context getApplicationContext() { return this; }
 
@@ -289,7 +341,7 @@ public final class LaunchServer {
                 android.content.ComponentName component = launch.resolveActivity(getPackageManager());
                 if (component == null) return;
                 String name = component.getPackageName();
-                if (name.equals("com.xreal.evapro.nebula") || name.equals("dev.beampro.portprobe")
+                if (name.equals("dev.markpronkin.unbound") || name.equals("dev.beampro.portprobe")
                         || getPackageManager().getLaunchIntentForPackage(name) == null) return;
                 recentApps.record(name, System.currentTimeMillis());
                 recentPreviews.prune();

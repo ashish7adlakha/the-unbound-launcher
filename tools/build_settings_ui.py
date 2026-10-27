@@ -23,6 +23,8 @@ from trackpad_taps import patch_trackpad_taps, restore_trackpad_taps, RELEASE_DE
 from trackpad_background import BACKGROUNDS, patch_trackpad_background, restore_trackpad_background
 from verify_display_defaults import verify_display_control_excluded, verify_display_defaults
 from app_version import load_version, manifest_version, patch_manifest_version, write_java_version
+from updater_manifest import patch_updater_manifest
+from debug_manifest import patch_debug_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "artifacts/port-default-m/myglasses-startup-candidate.apk"
@@ -149,7 +151,9 @@ def main():
         run(TOOLS / "apksigner", "verify", "--verbose", apk)
         run(TOOLS / "zipalign", "-c", "-P", "16", "4", apk)
 
-    preview_jar = compile_sources(sources + sorted((ROOT / "settings-ui/preview/src").rglob("*.java")), build / "preview-classes")
+    preview_jar = compile_sources(sources + sorted((ROOT / "settings-ui/preview/src").rglob("*.java"))
+                                  + [ROOT / "port-client/src/dev/beampro/port/ConnectionAnimation.java",
+                                     ROOT / "bridge/src/dev/beampro/bridge/DisplayDumpPipe.java"], build / "preview-classes")
     preview_dex = build / "preview-dex"
     preview_dex.mkdir(exist_ok=True)
     run(TOOLS / "d8", "--min-api", "29", "--lib", PLATFORM, "--output", preview_dex, preview_jar)
@@ -224,6 +228,7 @@ def main():
                 value = patch_permission_manifest(value)
                 value = patch_permission_manifest(value, "dev.beampro.settings.AppMenuActivity")
                 value = patch_adaptive_manifest(value)
+                value = patch_debug_manifest(patch_updater_manifest(value))
                 (build / "permission-manifest.bin").write_bytes(value)
             if info.filename == "lib/arm64-v8a/libil2cpp.so":
                 baseline_library = value
@@ -263,9 +268,11 @@ def main():
         "baseline": str(args.baseline), "baseline_sha256": BASELINE_SHA,
         "version": version, "base_app": {"name": "MyGlasses", **base_version},
         "about_page": {"fan_project_description": True, "original_privacy_and_terms_callbacks": True,
-                       "app_and_base_versions": True},
+                       "app_and_base_versions": True, "github_app_updater": True},
         "help": {"placement": "immediately below About", "url": "https://discord.gg/J7t64xupfQ",
-                 "opens_with": "Android ACTION_VIEW in Discord or a browser"},
+                 "opens_with": "Help menu with Get help first, then debugging controls",
+                 "debug_export": {"format": "ZIP", "max_bytes": 15000000, "local_ring_bytes": 12000000,
+                                  "share": True, "save_to_downloads": True, "collection_opt_in": True}},
         "theme": "Signature OLED: true black with monochrome controls in every device theme", "changed_payloads": changed,
         "adaptive_phone_layout": {"two_panes_from_dp": 600, "maximum_width_dp": 1280,
                                   "settings": "glasses and launch beside independently scrolling settings",

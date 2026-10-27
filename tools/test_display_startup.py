@@ -11,6 +11,11 @@ from display_startup import patch_display_startup
 ROOT = Path(__file__).resolve().parents[1]
 JAVA = Path(subprocess.check_output(['/usr/libexec/java_home', '-v', '17'], text=True).strip())
 STUBS = {
+    'dev/beampro/port/PresentationOnlyCompat.java': '''package dev.beampro.port;
+      public class PresentationOnlyCompat {public static boolean owns(Object app){return false;}
+      public static boolean direct;public static int displayId;
+      public static boolean isActive(android.app.Activity owner){return direct;}
+      public static boolean directDisplay(android.view.Display display){return direct&&display!=null&&display.getDisplayId()==displayId;}}''',
     'dev/beampro/port/StereoPresentationCompat.java': '''package dev.beampro.port;
       public class StereoPresentationCompat {public static void track(android.app.Activity owner){}}''',
     'android/os/Bundle.java': '''package android.os; public class Bundle extends java.util.HashMap<String,Integer> {
@@ -41,7 +46,7 @@ STUBS = {
       public Intent setComponent(ComponentName c){this.c=c;return this;} public ComponentName getComponent(){return c;}}''',
     'android/content/Context.java': '''package android.content; import android.app.*; import android.hardware.display.*;
       public class Context { public static Application app; public static DisplayManager displays; public static ActivityManager manager;
-      public Context getApplicationContext(){return app;} public String getPackageName(){return "com.xreal.evapro.nebula";}
+      public Context getApplicationContext(){return app;} public String getPackageName(){return "dev.markpronkin.unbound";}
       public <T>T getSystemService(Class<T> c){return c.cast(c==DisplayManager.class?displays:manager);}}''',
     'android/app/Application.java': '''package android.app; import android.os.Bundle; public class Application extends android.content.Context {
       public java.util.List<ActivityLifecycleCallbacks> callbacks=new java.util.ArrayList<>();

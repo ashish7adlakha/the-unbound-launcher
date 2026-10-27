@@ -14,10 +14,25 @@ import zipfile
 from app_version import load_version, manifest_version, patch_manifest_version, write_java_version
 from embedded_adb_manifest import patch_manifest, patch_release_manifest, patch_usb_attach_manifest, AUTHORITY
 from display_startup import patch_display_startup
+from presentation_only import patch_presentation
 from adaptive_manifest import patch_adaptive_manifest
-from app_color import APP_SHADER, LIBRARY, automatic_app_shader, verify_app_shader, patch_color_dex, patch_color_native
+from app_color import APP_SHADER, LIBRARY, OES_SHADERS, automatic_app_shader, direct_oes_shader, verify_app_shader, verify_direct_oes_shaders, patch_color_dex, patch_color_native
 from icon_resolution import patch_icon_resolution
 from usb_permission import patch_usb_permission, patch_controller_usb_permission
+from connection_startup import patch_connection_startup, patch_connection_theme_manifest
+from disconnect_audio import patch_disconnect_audio
+from ping_cancellation import patch_ping_cancellation
+from glasses_startup import patch_glasses_startup
+from ethernet_ping import patch_ethernet_ping
+from display_mode_compat import LIBRARY as MODE_LIBRARY, patch_display_mode, verify_display_mode
+from overlay_color import patch_overlay_color, verify_overlay_color
+from skip_ota import patch_skip_ota
+from startup_tutorial import patch_startup_tutorial
+from experimental_stereo import patch_stereo_dex, patch_stereo_native
+from updater_manifest import patch_updater_manifest
+from debug_manifest import patch_debug_manifest
+from package_identity import PACKAGE, METADATA, BINARY_ENCODINGS, patch_binary_identity, repackage_dex
+from hardware_buffer_texture import ENTRY as TEXTURE_LIBRARY, build_library
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / "artifacts/unbound-launcher-help/the-unbound-launcher.apk"
@@ -58,8 +73,17 @@ def write_pairing_sources(destination, root=ROOT):
     for directory in ["embedded-adb", "settings-ui/src", "bridge/src", "port-client/src"]:
         paths.extend(path for path in (root / directory).rglob("*") if pairing_source_file(path, root))
     paths.extend(root / name for name in ["version.json", "LICENSE"])
-    for name in ["build_embedded_adb.py", "app_version.py", "embedded_adb_manifest.py", "adaptive_manifest.py", "display_startup.py", "PatchDisplayStartupDex.java", "app_color.py", "PatchAppColorDex.java", "app_color_select.S", "app_color_native.json", "xreal_telemetry.py", "icon_resolution.py", "PatchIconResolutionDex.java", "usb_permission.py", "PatchUsbPermissionDex.java", "PatchControllerUsbDex.java"]:
+    for name in ["build_embedded_adb.py", "app_version.py", "updater_manifest.py", "debug_manifest.py", "embedded_adb_manifest.py", "adaptive_manifest.py", "display_startup.py", "PatchDisplayStartupDex.java", "connection_startup.py", "PatchConnectionStartupDex.java", "disconnect_audio.py", "PatchDisconnectAudioDex.java", "skip_ota.py", "PatchSkipOtaDex.java", "startup_tutorial.py", "experimental_stereo.py", "experimental_stereo.S", "experimental_stereo_native.json", "PatchExperimentalStereoDex.java", "app_color.py", "PatchAppColorDex.java", "app_color_select.S", "app_color_oes.S", "app_color_native.json", "xreal_telemetry.py", "icon_resolution.py", "PatchIconResolutionDex.java", "usb_permission.py", "PatchUsbPermissionDex.java", "PatchControllerUsbDex.java"]:
         paths.append(root / "tools" / name)
+    paths.extend(root / "tools" / name for name in ("package_identity.py", "RepackageDex.java"))
+    paths.extend(root / "tools" / name for name in ("startup_theme.py", "branding.py"))
+    paths.extend(root / "tools" / name for name in ("ping_cancellation.py", "PatchPingCancellationDex.java"))
+    paths.extend(root / "tools" / name for name in ("glasses_startup.py", "PatchGlassesStartupDex.java"))
+    paths.extend(root / "tools" / name for name in ("ethernet_ping.py", "PatchEthernetPingDex.java"))
+    paths.append(root / "tools/display_mode_compat.py")
+    paths.extend(root / "tools" / name for name in ("presentation_only.py", "PatchPresentationDex.java"))
+    paths.append(root / "tools/hardware_buffer_texture.py")
+    paths.append(root / "native/hardware-buffer-texture/library.c")
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(set(paths)):
             if not pairing_source_file(path, root):
@@ -83,7 +107,7 @@ def sha256(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=ROOT / "artifacts/unbound-launcher-0.1.0-alpha")
+    parser.add_argument("--output", type=Path, default=ROOT / "artifacts/unbound-launcher-0.1.2-alpha")
     parser.add_argument("--test-only", action="store_true", help="Build a small isolated device-test APK instead of the launcher")
     args = parser.parse_args()
     authority = "dev.beampro.adbtest.bridge" if args.test_only else AUTHORITY
@@ -128,14 +152,21 @@ def main():
                 marker="private static final boolean ENABLE_DISPLAY_MANAGEMENT = false;"
                 if text.count(marker)!=1: raise ValueError("Managed display startup marker changed")
                 text=text.replace(marker,"private static final boolean ENABLE_DISPLAY_MANAGEMENT = true;")
-            text = text.replace('getApplicationInfo("dev.beampro.portprobe", 0)', 'getApplicationInfo("com.xreal.evapro.nebula", 0)')
+            text = text.replace('getApplicationInfo("dev.beampro.portprobe", 0)', 'getApplicationInfo("' + PACKAGE + '", 0)')
             text = text.replace("dev.beampro.portprobe.bridge", authority)
+            if not args.test_only:
+                text = text.replace('"/data/local/tmp/beampro-recent-apps.bin"',
+                                    '"/data/local/tmp/' + PACKAGE + '/recent-apps.bin"')
+                text = text.replace('new java.io.File("/data/local/tmp")',
+                                    'new java.io.File("/data/local/tmp/' + PACKAGE + '")')
             if args.test_only:
-                text = text.replace('getApplicationInfo("com.xreal.evapro.nebula", 0)', 'getApplicationInfo("dev.beampro.adbtest", 0)')
+                text = text.replace('getApplicationInfo("' + PACKAGE + '", 0)', 'getApplicationInfo("dev.beampro.adbtest", 0)')
             text = text.replace('externalProvider = holder.getClass().getField("provider").get(holder);',
                                 'externalProvider = holder.getClass().getField("provider").get(holder);\n'
                                 '        ((android.os.IInterface) externalProvider).asBinder().linkToDeath(() -> System.exit(0), 0);')
         target = server_sources / source.name; target.write_text(text); sources.append(target)
+    sources.append(ROOT / "settings-ui/src/dev/beampro/settings/NetworkDiagnostics.java")
+    sources.append(ROOT / "settings-ui/src/dev/beampro/settings/DisplayDiagnostics.java")
     server_jar = compile_java(sources, "server")
     server_dex = dex([server_jar], "server-dex")
     with zipfile.ZipFile(ROOT / "artifacts/beam-pro-system/myglasses-dex.zip") as archive:
@@ -144,7 +175,11 @@ def main():
         ROOT / "tools/PatchLaunchDex.java", "server", build / "original.dex", build / "server-original.dex")
     helper = build / "unbound-shell.jar"
     with zipfile.ZipFile(helper, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.write(server_dex[0], "classes.dex"); archive.write(build / "server-original.dex", "classes2.dex")
+        for name, path in (("classes.dex", server_dex[0]), ("classes2.dex", build / "server-original.dex")):
+            value = path.read_bytes()
+            if not args.test_only:
+                value = repackage_dex(value, build / "identity-helper" / name, java, env)
+            archive.writestr(name, value)
     helper_sha = sha256(helper)
     generated = build / "generated/dev/beampro/adb"; generated.mkdir(parents=True, exist_ok=True)
     payload = generated / "HelperPayload.java"
@@ -194,11 +229,20 @@ def main():
     if not args.test_only:
         with zipfile.ZipFile(BASE) as source:
             startup_dex = patch_display_startup(source.read("classes.dex"), build / "display-startup", java, env)
+            startup_dex = patch_presentation(startup_dex, build / "presentation-only", java, env)
             startup_dex = patch_controller_usb_permission(startup_dex, build / "controller-usb", java, env)
+            startup_dex = patch_connection_startup(startup_dex, build / "connection-startup", java, env)
+            startup_dex = patch_skip_ota(startup_dex, build / "skip-ota", java, env)
+            startup_dex = patch_stereo_dex(startup_dex, build / "experimental-stereo", java, env)
             presentation_dex = patch_display_startup(source.read("classes3.dex"), build / "stereo-presentation", java, env)
             icon_dex = patch_icon_resolution(source.read("classes2.dex"), build / "icon-resolution", java, env)
             icon_dex = patch_color_dex(icon_dex, build / "app-colors", java, env)
             icon_dex = patch_usb_permission(icon_dex, build / "usb-permission", java, env)
+            icon_dex = patch_disconnect_audio(icon_dex, build / "disconnect-audio", java, env)
+            icon_dex = patch_ping_cancellation(icon_dex, build / "ping-cancellation", java, env)
+            icon_dex = patch_glasses_startup(icon_dex, build / "glasses-startup", java, env)
+            icon_dex = patch_ethernet_ping(icon_dex, build / "ethernet-ping", java, env)
+    texture_library = None if args.test_only else build_library(build / "libHardwareBufferTexture.so")
     with zipfile.ZipFile(baseline) as source, zipfile.ZipFile(unsigned, "w", allowZip64=True) as target:
         for info in source.infolist():
             if info.filename.upper().startswith("META-INF/"): continue
@@ -209,9 +253,22 @@ def main():
             if info.filename == "classes2.dex" and icon_dex is not None: value = icon_dex
             if info.filename == "classes4.dex": value = client_dex.read_bytes()
             if info.filename == APP_SHADER and not args.test_only: value = automatic_app_shader(source)
-            if info.filename == LIBRARY and not args.test_only: value = patch_color_native(value)
+            if info.filename in OES_SHADERS and not args.test_only: value = direct_oes_shader(value)
+            if info.filename == LIBRARY and not args.test_only:
+                value = patch_stereo_native(patch_startup_tutorial(patch_color_native(value)))
+            if info.filename == MODE_LIBRARY and not args.test_only:
+                value = patch_overlay_color(patch_display_mode(value))
+            if info.filename == TEXTURE_LIBRARY and texture_library is not None:
+                value = texture_library
             if info.filename == "AndroidManifest.xml" and not args.test_only:
                 value = patch_usb_attach_manifest(patch_release_manifest(patch_adaptive_manifest(patch_manifest(patch_manifest_version(value, VERSION)))))
+                value = patch_debug_manifest(patch_updater_manifest(value))
+                value = patch_connection_theme_manifest(value)
+            if not args.test_only:
+                if info.filename in BINARY_ENCODINGS:
+                    value = patch_binary_identity(info.filename, value)
+                elif info.filename.startswith("classes") and info.filename.endswith(".dex"):
+                    value = repackage_dex(value, build / "identity" / info.filename, java, env)
             # ZipFile.writestr mutates ZipInfo.header_offset. Preserve source
             # entries so a later shader substitution can still read an earlier entry.
             target.writestr(copy.copy(info), value)
@@ -231,9 +288,12 @@ def main():
                 if name.upper().startswith("META-INF/"): continue
                 if source.read(name) != target.read(name): changed.append(name)
             added = sorted(set(target.namelist()) - set(source.namelist()))
-            expected={"classes.dex", "classes2.dex", "classes3.dex", "classes4.dex", "classes5.dex", "AndroidManifest.xml", APP_SHADER, LIBRARY}
+            expected={"classes.dex", "classes2.dex", "classes3.dex", "classes4.dex", "classes5.dex", "AndroidManifest.xml", "resources.arsc", METADATA, APP_SHADER, *OES_SHADERS, LIBRARY, MODE_LIBRARY, TEXTURE_LIBRARY}
             if set(changed) != expected: raise ValueError(f"Unexpected changes: {changed}")
             color_report=verify_app_shader(target,source)
+            color_report.update(verify_direct_oes_shaders(target,source))
+            if not color_report['automatic_decode_selection'] or not color_report['direct_oes_software_uniform']:
+                raise ValueError('App color selection was not packaged')
             if manifest_version(target.read("AndroidManifest.xml")) != VERSION: raise ValueError("Version mismatch")
     report = {"apk": str(apk), "sha256": sha256(apk), "version": VERSION, "single_apk": True,
               "requires_companion_apk": False, "helper_sha256": helper_sha, "loopback_only": True,
@@ -241,6 +301,32 @@ def main():
               "signature_and_alignment_verified": True, "physical_device_validation": "pending"}
     if not args.test_only:report['app_colors']=color_report
     if not args.test_only:report['debuggable']=False
+    if not args.test_only:
+        report['package_identity'] = {'package': PACKAGE, 'original_class_names_preserved': True,
+                                      'dex_reverse_semantics_verified': True,
+                                      'install': 'separate app; repeat permissions and pairing'}
+    if not args.test_only:
+        report['app_detection'] = {'settings_section': 'Experimental', 'control': 'Detect as game',
+                                   'default': 'normal app', 'system_category_readback': True,
+                                   'installer_restored': True, 'installer_crash_recovery': True,
+                                   'scope': 'launcher package only', 'manufacturer_game_tools': 'device dependent'}
+    report['onboarding'] = {'steps': ['permissions', 'connection', 'terms'],
+                            'inline_terms': True, 'original_acceptance_record': True,
+                            'automatic_entry_waits_for_agreement': True}
+    if not args.test_only:
+        report['app_updater'] = {'repository': 'MarkPronkin/the-unbound-launcher',
+                                 'about_controls': ['App updates', 'Check on startup', 'Check for updates'],
+                                 'prerelease_aware': True, 'verified_downloads': True,
+                                 'android_install_confirmation': True}
+    if not args.test_only:
+        report['startup_tutorial']={'automatic_first_use_disabled':True,
+                                    'manual_tutorial_preserved':True,
+                                    'saved_completion_data_unchanged':True,
+                                    'hardware_validation':'pending'}
+    if not args.test_only:
+        report['skip_ota']={'always_enabled':True,'native_firmware_probe_removed':True,
+                            'model_sku_preserved':True,'forced_update_ui_bypassed':True,
+                            'low_level_flash_and_boot_guards_retained':True,'hardware_validation':'pending'}
     if not args.test_only:
         report['xreal_usb_access']={'deferred_until_helper_ready':True,'launcher_only':True,
                                    'usb_handler_confirmation_removed':True,'all_five_sdk_requests_hooked':True,
@@ -251,6 +337,32 @@ def main():
     report['recent_previews']={'capture_api_from_binder_signature':True,'headless_direct_services':True,
                               'fresh_owned_display_checks':True,'max_dimension':400,
                               'secure_and_protected_content_excluded':True,'hardware_validation':'pending'}
+    report['connection_animation'] = {'phone_full_screen': True, 'style': 'Dot-matrix USB, glasses and trackpad pointer',
+                                      'live_connection_stages': True, 'sdk_initialization_unchanged': True,
+                                      'success_handoff_ms': 650, 'reduced_motion': True, 'retry_and_cancel': True,
+                                      'hardware_validation': 'pending'}
+    report['network_diagnostics'] = {'fixed_read_only_probes': True, 'app_and_shell_identities': True,
+                                     'failure_and_export_snapshots': True, 'retained_snapshots': 3,
+                                     'max_snapshot_bytes': 64000, 'helper_optional_for_export': True}
+    report['display_diagnostics'] = {'services': ['display', 'SurfaceFlinger'], 'launcher_uid_only': True,
+                                     'pipe_transport': True, 'max_dump_bytes': 1010000,
+                                     'command_timeout_ms': 10000, 'helper_optional_for_export': True}
+    report['ping_cancellation'] = {'complete_once_on_usb_detach': True, 'sdk_worker_delivery': True,
+                                    'late_callbacks_rejected': True, 'connectivity_check_preserved': True,
+                                    'hardware_validation': 'pending'}
+    report['ethernet_readiness'] = {'fixed_shell_ping': True, 'launcher_uid_only': True,
+                                    'original_sdk_polling_and_timeout_preserved': True,
+                                    'cancel_and_usb_identity_rechecked': True,
+                                    'helper_timeout_and_no_backlog': True, 'hardware_validation': 'pending'}
+    report['glasses_startup'] = {'type_11_unsupported_query_fallback': not args.test_only,
+                                 'native_init_and_active_xreal_display_required': True,
+                                 'only_native_error_103': True, 'ethernet_startup_unchanged': True,
+                                 'hardware_validation': 'pending'}
+    if not args.test_only:
+        with zipfile.ZipFile(apk) as built:
+            mode_library = built.read(MODE_LIBRARY)
+            report['overlay_color'] = verify_overlay_color(mode_library)
+            report['display_mode_compatibility'] = verify_display_mode(patch_overlay_color(mode_library, restore=True))
     report['headset_icons']={'max_texture_size':432,'requested_source_density':640,
                              'adaptive_layer_contract_preserved':True,'native_pixel_transport_unchanged':True,
                              'scope':'Installed-app headset icons; built-in artwork and phone editor unchanged'}
@@ -265,14 +377,27 @@ def main():
                                                      "toolbar_search_above_editor_and_preview": True,
                                                      "compact_preview_below_height_dp": 520,
                                                      "setup": "overview and actions beside scrolling details"}}
+    report["experimental_stereo"] = {"enabled_by_default": False, "only_original_mono_modes_overridden": True,
+                                      "output": "3840x1080 SBS at 60 Hz", "java_and_unity_selectors_filtered": not args.test_only,
+                                      "apply": "Reconnect glasses", "hardware_validation": "pending"}
+    report["samsung_compatibility"] = {"auto_entry_phone_display": 0, "auto_entry_fullscreen": True,
+                                       "dex_keep_process_alive_metadata": not args.test_only,
+                                       "manual_display_choice_respected_after_initial_configuration": True,
+                                       "choice_scope": "same physical display for the helper lifetime",
+                                       "optional_mono_60_hz": True, "mono_60_enabled_by_default": False,
+                                       "mono_and_stereo_overrides_mutually_exclusive": True,
+                                       "physical_validation": "pending"}
     report["display_startup"] = {"window_scoped_stereo_mode_request": True,
                                  "actual_sdk_presentation_window_hooked": True,
                                  "native_window_discovery_via_window_inspector": True,
-                                 "opaque_ar_backdrop_controls_immersive_bars": True,
-                                 "native_and_backdrop_input_focus_preserved": True,
+                                 "opaque_ar_backdrop_controls_immersive_bars_before_android_17": True,
+                                 "android_17_presentation_owns_bar_focus": True,
+                                 "android_17_renderer_excluded_from_touch_and_ime_target": True,
                                  "consent_wait_seconds": 45,
                                  "temporary_resolution_store_mode": False,
-                                 "per_xreal_desktop_preference_saved": not args.test_only,
+                                 "per_xreal_mirror_preference_restored": not args.test_only,
+                                 "desktop_routing_removed": True,
+                                 "direct_presentation_always_on": True,
                                  "legacy_xreal_connected_display_auto_enable": not args.test_only,
                                  "embedded_display_watchdog_enabled": not args.test_only,
                                  "discovery_uses_direct_service_snapshots": True,

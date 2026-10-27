@@ -52,11 +52,12 @@ public final class StereoPresentationCompat {
             HashSet<Integer> live=new HashSet<>();
             for(View root:WindowInspector.getGlobalWindowViews()) {
                 if(!root.isAttachedToWindow()||!DisplayStartupCompat.xreal(root.getDisplay())
-                        ||!DisplayStartupCompat.stereoEdid(root.getDisplay())
+                        ||(!DisplayStartupCompat.stereoEdid(root.getDisplay())&&!PresentationOnlyCompat.directDisplay(root.getDisplay()))
                         ||!(root.getLayoutParams() instanceof WindowManager.LayoutParams))continue;
                 int type=((WindowManager.LayoutParams)root.getLayoutParams()).type;
                 if(type==TYPE_PRESENTATION||type==WindowManager.LayoutParams.TYPE_PRIVATE_PRESENTATION){
-                    watchView(root);live.add(root.getDisplay().getDisplayId());ArBackdropActivity.ensure(activity,root);}
+                    watchView(root);
+                    if(Build.VERSION.SDK_INT<37&&!PresentationOnlyCompat.isActive(activity)){live.add(root.getDisplay().getDisplayId());ArBackdropActivity.ensure(activity,root);}}
             }
             ArBackdropActivity.releaseMissing(activity,live);
             handler.postDelayed(this,500);
@@ -65,7 +66,23 @@ public final class StereoPresentationCompat {
 
     /** Called after construction of the SDK's two own views, before native code attaches them. */
     public static synchronized void watchView(View view) {
-        if (view == null || watched.containsKey(view)) return;
+        if (view == null) return;
+        if (watched.containsKey(view)) {
+            // The native renderer can reapply its non-focusable flags after
+            // attachment. Reconcile those writes without repeatedly relaying out
+            // a healthy window or changing any unrelated overlay.
+            if(Build.VERSION.SDK_INT>=37&&view.isAttachedToWindow()) {
+                View root=view.getRootView();
+                if(root.getLayoutParams() instanceof WindowManager.LayoutParams) {
+                    int flags=((WindowManager.LayoutParams)root.getLayoutParams()).flags;
+                    WeakReference<Session> reference=roots.get(root);
+                    Session session=reference==null?null:reference.get();
+                    if(session!=null&&((flags&WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)!=0
+                            ||(flags&WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)==0))session.schedule();
+                }
+            }
+            return;
+        }
         watched.put(view, true);
         Attachment attachment = new Attachment();
         view.addOnAttachStateChangeListener(attachment);
@@ -129,6 +146,12 @@ public final class StereoPresentationCompat {
             if (attrs.type != TYPE_PRESENTATION
                     && attrs.type != WindowManager.LayoutParams.TYPE_PRIVATE_PRESENTATION) return;
             int mode = DisplayStartupCompat.stereoEdid(display) ? DisplayStartupCompat.stereoMode(display) : 0;
+            boolean direct=PresentationOnlyCompat.directDisplay(display);
+            if(direct) {
+                Display.Mode current=display.getMode();
+                if(current.getPhysicalHeight()==1080&&(current.getPhysicalWidth()==1920||current.getPhysicalWidth()==3840))mode=current.getModeId();
+                else mode=0;
+            }
             if (mode == 0) { releaseMode(); return; }
             if (!registered) {
                 displays.registerDisplayListener(this, new Handler(Looper.getMainLooper()));
@@ -144,6 +167,15 @@ public final class StereoPresentationCompat {
             int flags = (attrs.flags | WindowManager.LayoutParams.FLAG_FULLSCREEN
                     | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN)
                     & ~WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN;
+            if(Build.VERSION.SDK_INT>=37) {
+                // Android 17 PresentationController occludes every Activity on
+                // the display, so an immersive backdrop cannot run. The public
+                // Presentation must own bar control itself. Touch stays with the
+                // phone controller; ALT_FOCUSABLE_IM excludes this renderer from
+                // the IME target used by apps on their managed virtual displays.
+                flags=(flags|WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE|WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
+                        &~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+            }
             if (attrs.flags != flags) { attrs.flags = flags; changed = true; }
             if (attrs.width != ViewGroup.LayoutParams.MATCH_PARENT || attrs.height != ViewGroup.LayoutParams.MATCH_PARENT
                     || attrs.x != 0 || attrs.y != 0 || attrs.gravity != (Gravity.TOP | Gravity.LEFT)) {
@@ -179,7 +211,7 @@ public final class StereoPresentationCompat {
                     }
                 }
                 if (changed) Log.i(TAG, "SDK Presentation display=" + display.getDisplayId()
-                        + " requests mode=" + attrs.preferredDisplayModeId + " (3840x1080@60), full display without insets"
+                        + " requests mode=" + attrs.preferredDisplayModeId + (direct?" (direct Presentation)":" (3840x1080@60)")+", full display without insets"
                         + "; root=" + root.getWidth() + "x" + root.getHeight());
             } catch (IllegalArgumentException failure) {
                 Log.w(TAG, "Presentation was removed during layout update", failure);

@@ -4,7 +4,7 @@ import zipfile
 import struct
 
 from build_embedded_adb import BASE
-from embedded_adb_manifest import patch_manifest, patch_release_manifest, patch_usb_attach_manifest, AUTHORITY
+from embedded_adb_manifest import patch_manifest, patch_release_manifest, patch_usb_attach_manifest, AUTHORITY, AR_BACKDROP_THEME
 from verify_embedded_adb import elements, verify_attribute_order
 
 
@@ -18,7 +18,44 @@ class EmbeddedAdbManifestTests(unittest.TestCase):
     def test_existing_components_and_permissions_preserved(self):
         for element in self.before:
             self.assertIn(element, self.after)
-        self.assertEqual(len(self.before) + 4, len(self.after))
+        self.assertEqual(len(self.before) + 9, len(self.after))
+
+    def test_samsung_process_preservation_is_application_metadata(self):
+        key = 'com.samsung.android.multidisplay.keep_process_alive'
+        self.assertEqual([a for t, a in self.after if t == 'meta-data' and a.get('name') == key],
+                         [{'name': key, 'value': 0xFFFFFFFF}])
+        from build_port_bootstrap import chunks
+        from branding import _pool_strings
+        with zipfile.ZipFile(BASE) as archive:
+            manifest = patch_manifest(archive.read('AndroidManifest.xml'))
+        nodes = list(chunks(manifest))
+        _, at, _, size = next(n for n in nodes if n[0] == 1)
+        strings = _pool_strings(manifest[at:at + size])
+        stack = []
+        for kind, at, header, _ in nodes:
+            if kind == 0x102:
+                tag = strings[struct.unpack_from('<I', manifest, at + header + 4)[0]]
+                offset, stride, count = struct.unpack_from('<HHH', manifest, at + header + 8)
+                for i in range(count):
+                    attr = at + header + offset + i * stride
+                    if manifest[attr + 15] == 3 and strings[struct.unpack_from('<I', manifest, attr + 16)[0]] == key:
+                        self.assertEqual(tag, 'meta-data')
+                        self.assertEqual(stack, ['manifest', 'application'])
+                stack.append(tag)
+            elif kind == 0x103:
+                stack.pop()
+
+    def test_automatic_usb_entry_is_a_private_broadcast_receiver(self):
+        name = 'dev.beampro.adb.AutoGlassesReceiver'
+        matches = [attrs for tag, attrs in self.after if tag == 'receiver' and attrs.get('name') == name]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]['exported'], 0)
+        index = next(i for i, (tag, attrs) in enumerate(self.after) if tag == 'receiver' and attrs.get('name') == name)
+        self.assertEqual(self.after[index + 1], ('intent-filter', {}))
+        self.assertEqual(self.after[index + 2:index + 4], [
+            ('action', {'name': 'android.hardware.usb.action.USB_DEVICE_ATTACHED'}),
+            ('action', {'name': 'android.hardware.usb.action.USB_DEVICE_DETACHED'}),
+        ])
 
     def test_pairing_and_overlay_cannot_be_launched_by_other_apps(self):
         for name in ("AdbPairingActivity", "PairingOverlayService"):
@@ -32,10 +69,15 @@ class EmbeddedAdbManifestTests(unittest.TestCase):
         self.assertEqual(matches[0]["process"], ":unbound_bridge")
         self.assertEqual(matches[0]["exported"], 0xFFFFFFFF)
 
-    def test_ar_backdrop_is_private(self):
+    def test_ar_backdrop_shares_renderer_process_and_declares_opaque_theme(self):
         matches=[attrs for tag,attrs in self.after if attrs.get('name')=='dev.beampro.port.ArBackdropActivity']
         self.assertEqual(len(matches),1)
         self.assertEqual(matches[0]['exported'],0)
+        renderer=[attrs for tag,attrs in self.after if attrs.get('name')=='ai.nreal.nebula.space.LaunchSpaceAcrivity']
+        self.assertEqual(len(renderer),1)
+        self.assertEqual(renderer[0]['process'],':space')
+        self.assertEqual(matches[0]['process'],renderer[0]['process'])
+        self.assertEqual(matches[0]['theme'],AR_BACKDROP_THEME)
 
     def test_android_styled_attribute_order(self):
         with zipfile.ZipFile(BASE) as archive:
